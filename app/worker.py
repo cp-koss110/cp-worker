@@ -16,12 +16,30 @@ import boto3
 from botocore.exceptions import BotoCoreError, ClientError
 
 # ==========================================
-# Logging
+# Logging — JSON format
 # ==========================================
-logging.basicConfig(
-    level=logging.INFO,
-    format="%(asctime)s [%(levelname)s] %(name)s - %(message)s",
-)
+class _JsonFormatter(logging.Formatter):
+    def format(self, record: logging.LogRecord) -> str:
+        payload = {
+            "timestamp": self.formatTime(record, "%Y-%m-%dT%H:%M:%SZ"),
+            "level": record.levelname,
+            "logger": record.name,
+            "message": record.getMessage(),
+        }
+        if record.exc_info:
+            payload["exception"] = self.formatException(record.exc_info)
+        return json.dumps(payload)
+
+_handler = logging.StreamHandler()
+_handler.setFormatter(_JsonFormatter())
+logging.root.setLevel(os.getenv("LOG_LEVEL", "INFO").upper())
+logging.root.handlers = [_handler]
+
+# Keep AWS/HTTP internals quiet regardless of LOG_LEVEL
+logging.getLogger("botocore").setLevel(logging.WARNING)
+logging.getLogger("boto3").setLevel(logging.WARNING)
+logging.getLogger("urllib3").setLevel(logging.WARNING)
+
 logger = logging.getLogger(__name__)
 
 # ==========================================
