@@ -1,0 +1,246 @@
+"""
+Worker Service - DevOps Exam Costa
+Polls SQS, uploads messages to S3, deletes from queue after success
+"""
+
+import json
+import logging
+import os
+import signal
+import sys
+import time
+from datetime import datetime, timezone
+from typing import Any, Dict, List, Optional
+
+import boto3
+from botocore.exceptions import BotoCoreError, ClientError
+
+# ==========================================
+# Logging
+# ==========================================
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s [%(levelname)s] %(name)s - %(message)s",
+)
+logger = logging.getLogger(__name__)
+
+# ==========================================
+# Configuration
+# ==========================================
+AWS_REGION = os.getenv("AWS_REGION", "us-east-2")
+SQS_QUEUE_URL = os.getenv("SQS_QUEUE_URL", "")
+S3_BUCKET_NAME = os.getenv("S3_BUCKET_NAME", "")
+POLL_INTERVAL = int(os.getenv("POLL_INTERVAL", "5"))
+MAX_MESSAGES = int(os.getenv("MAX_MESSAGES_PER_POLL", "10"))
+VISIBILITY_TIMEOUT = int(os.getenv("SQS_VISIBILITY_TIMEOUT", "30"))
+WAIT_TIME_SECONDS = int(os.getenv("SQS_WAIT_TIME_SECONDS", "20"))  # Long polling
+
+# LocalStack support
+LOCALSTACK_ENDPOINT = os.getenv("LOCALSTACK_ENDPOINT", "")
+AWS_KWARGS: Dict[str, Any] = {"region_name": AWS_REGION}
+if LOCALSTACK_ENDPOINT:
+    AWS_KWARGS["endpoint_url"] = LOCALSTACK_ENDPOINT
+
+# ==========================================
+# AWS Clients
+# ==========================================
+sqs_client = boto3.client("sqs", **AWS_KWARGS)
+s3_client = boto3.client("s3", **AWS_KWARGS)
+
+
+# ==========================================
+# Worker Logic
+# ==========================================
+class Worker:
+    """SQS → S3 message processor."""
+
+    def __init__(
+        self,
+        queue_url: str,
+        bucket_name: str,
+        poll_interval: int = POLL_INTERVAL,
+    ) -> None:
+        self.queue_url = queue_url
+        self.bucket_name = bucket_name
+        self.poll_interval = poll_interval
+        self._running = False
+        self._stats = {"processed": 0, "failed": 0, "started_at": datetime.now(timezone.utc).isoformat()}
+
+    def start(self) -> None:
+        """Start the worker loop (blocking)."""
+        logger.info(
+            "Worker starting: queue=%s bucket=%s interval=%ds",
+            self.queue_url,
+            self.bucket_name,
+            self.poll_interval,
+        )
+        self._running = True
+
+        while self._running:
+            try:
+                messages = self._poll()
+                if messages:
+                    logger.info("Received %d message(s)", len(messages))
+                    for msg in messages:
+                        self._handle(msg)
+                else:
+                    logger.debug("No messages, waiting %ds", self.poll_interval)
+                    time.sleep(self.poll_interval)
+            except KeyboardInterrupt:
+                logger.info("Interrupted, stopping worker")
+                break
+            except Exception as e:
+                logger.error("Unexpected error in worker loop: %s", e, exc_info=True)
+                time.sleep(self.poll_interval)
+
+        logger.info(
+            "Worker stopped. Stats: processed=%d failed=%d",
+            self._stats["processed"],
+            self._stats["failed"],
+        )
+
+    def stop(self) -> None:
+        """Signal the worker to stop after current message."""
+        logger.info("Worker stopping...")
+        self._running = False
+
+    def _poll(self) -> List[Dict]:
+        """Poll SQS for messages using long polling."""
+        try:
+            response = sqs_client.receive_message(
+                QueueUrl=self.queue_url,
+                MaxNumberOfMessages=MAX_MESSAGES,
+                WaitTimeSeconds=WAIT_TIME_SECONDS,
+                VisibilityTimeout=VISIBILITY_TIMEOUT,
+                MessageAttributeNames=["All"],
+            )
+            return response.get("Messages", [])
+        except (ClientError, BotoCoreError) as e:
+            logger.error("SQS poll error: %s", e)
+            time.sleep(self.poll_interval)
+            return []
+
+    def _handle(self, message: Dict) -> None:
+        """Process a single SQS message: upload to S3, then delete."""
+        receipt_handle = message.get("ReceiptHandle", "")
+        message_id = message.get("MessageId", "unknown")
+
+        try:
+            body = json.loads(message.get("Body", "{}"))
+            logger.info("Processing message: id=%s", message_id)
+
+            # Upload to S3
+            self._upload_to_s3(body, message_id)
+
+            # Delete from queue (only after successful S3 upload)
+            self._delete_from_sqs(receipt_handle, message_id)
+
+            self._stats["processed"] += 1
+            logger.info("Message processed successfully: id=%s", message_id)
+
+        except json.JSONDecodeError as e:
+            logger.error("Invalid JSON in message %s: %s", message_id, e)
+            self._stats["failed"] += 1
+            # Don't delete - let it expire and go to DLQ
+
+        except S3UploadError as e:
+            logger.error("S3 upload failed for message %s: %s", message_id, e)
+            self._stats["failed"] += 1
+            # Don't delete - message stays in queue, will retry
+
+        except Exception as e:
+            logger.error("Unexpected error processing message %s: %s", message_id, e, exc_info=True)
+            self._stats["failed"] += 1
+
+    def _upload_to_s3(self, body: Dict, message_id: str) -> None:
+        """Upload message body as JSON to S3."""
+        timestamp = datetime.now(timezone.utc)
+        date_prefix = timestamp.strftime("%Y/%m/%d")
+        s3_key = f"messages/{date_prefix}/{message_id}.json"
+
+        # Enrich with processing metadata
+        enriched = {
+            **body,
+            "_worker_metadata": {
+                "processed_at": timestamp.isoformat(),
+                "s3_key": s3_key,
+                "worker_version": "1.0.0",
+            },
+        }
+
+        try:
+            s3_client.put_object(
+                Bucket=self.bucket_name,
+                Key=s3_key,
+                Body=json.dumps(enriched, indent=2),
+                ContentType="application/json",
+                Metadata={
+                    "message-id": message_id,
+                    "processed-at": timestamp.isoformat(),
+                },
+            )
+            logger.info("Uploaded to S3: s3://%s/%s", self.bucket_name, s3_key)
+        except (ClientError, BotoCoreError) as e:
+            raise S3UploadError(f"S3 upload failed: {e}") from e
+
+    def _delete_from_sqs(self, receipt_handle: str, message_id: str) -> None:
+        """Delete message from SQS after successful processing."""
+        try:
+            sqs_client.delete_message(
+                QueueUrl=self.queue_url,
+                ReceiptHandle=receipt_handle,
+            )
+            logger.debug("Deleted message from SQS: id=%s", message_id)
+        except (ClientError, BotoCoreError) as e:
+            logger.error("Failed to delete message %s from SQS: %s", message_id, e)
+            raise
+
+    @property
+    def stats(self) -> Dict:
+        return dict(self._stats)
+
+
+class S3UploadError(Exception):
+    """Raised when S3 upload fails."""
+
+
+# ==========================================
+# Signal Handlers
+# ==========================================
+_worker_instance: Optional[Worker] = None
+
+
+def _handle_signal(signum: int, frame: Any) -> None:
+    logger.info("Received signal %d, initiating graceful shutdown", signum)
+    if _worker_instance:
+        _worker_instance.stop()
+
+
+# ==========================================
+# Entry Point
+# ==========================================
+def main() -> None:
+    global _worker_instance
+
+    # Validate required config
+    if not SQS_QUEUE_URL:
+        logger.error("SQS_QUEUE_URL is not set")
+        sys.exit(1)
+    if not S3_BUCKET_NAME:
+        logger.error("S3_BUCKET_NAME is not set")
+        sys.exit(1)
+
+    # Register signal handlers for graceful shutdown
+    signal.signal(signal.SIGTERM, _handle_signal)
+    signal.signal(signal.SIGINT, _handle_signal)
+
+    _worker_instance = Worker(
+        queue_url=SQS_QUEUE_URL,
+        bucket_name=S3_BUCKET_NAME,
+        poll_interval=POLL_INTERVAL,
+    )
+    _worker_instance.start()
+
+
+if __name__ == "__main__":
+    main()

@@ -1,0 +1,104 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*.*.*"
+  workflow_dispatch:
+    inputs:
+      image_tag:
+        description: "Existing image tag to deploy (skips build). Example: v1.2.3"
+        required: true
+        type: string
+      open_pr:
+        description: "Open PR from infra main to production"
+        required: false
+        type: boolean
+        default: true
+
+env:
+  AWS_REGION: ${{ secrets.AWS_REGION || 'us-east-2' }}
+  ECR_REPO: exam-costa-worker
+
+jobs:
+  release:
+    name: Build, Push & Update Infra
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout service repo
+        uses: actions/checkout@v4
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      # ---- Build + Push (only on tag push, not on workflow_dispatch) ----
+      - name: Login to Amazon ECR
+        id: ecr-login
+        if: github.event_name == 'push'
+        uses: aws-actions/amazon-ecr-login@v2
+
+      - name: Build and push Docker image
+        if: github.event_name == 'push'
+        env:
+          REGISTRY: ${{ steps.ecr-login.outputs.registry }}
+          IMAGE_TAG: ${{ github.ref_name }}
+        run: |
+          docker build -t $REGISTRY/$ECR_REPO:$IMAGE_TAG .
+          docker push $REGISTRY/$ECR_REPO:$IMAGE_TAG
+          echo "IMAGE_TAG=$IMAGE_TAG" >> $GITHUB_ENV
+
+      - name: Set image tag for dispatch
+        if: github.event_name == 'workflow_dispatch'
+        run: echo "IMAGE_TAG=${{ inputs.image_tag }}" >> $GITHUB_ENV
+
+      # ---- Update infra repo image_tags.staging.tfvars ----
+      - name: Checkout infra repo
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ secrets.INFRA_REPO }}
+          token: ${{ secrets.INFRA_REPO_TOKEN }}
+          path: infra
+          ref: main
+
+      - name: Update worker_image_tag in image_tags.staging.tfvars
+        run: |
+          sed -i "s|^worker_image_tag.*=.*|worker_image_tag = \"$IMAGE_TAG\"|" \
+            infra/iac/terraform/envs/eus2/image_tags.staging.tfvars
+
+      - name: Commit and push image tag update
+        run: |
+          cd infra
+          git config user.name  "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add iac/terraform/envs/eus2/image_tags.staging.tfvars
+          git commit -m "chore(staging): update worker_image_tag to $IMAGE_TAG [skip ci]" || echo "Nothing to commit"
+          git push origin main
+
+      # ---- Open PR infra main → production ----
+      - name: Open PR infra main to production
+        if: |
+          github.event_name == 'push' ||
+          (github.event_name == 'workflow_dispatch' && inputs.open_pr == true)
+        env:
+          GH_TOKEN: ${{ secrets.INFRA_REPO_TOKEN }}
+          GH_REPO: ${{ secrets.INFRA_REPO }}
+        run: |
+          cd infra
+          gh pr create \
+            --repo "$GH_REPO" \
+            --base production \
+            --head main \
+            --title "deploy: promote worker $IMAGE_TAG to production" \
+            --body "## Promote worker image tag \`$IMAGE_TAG\` to production
+
+          Triggered by: ${{ github.event_name }}
+          Service: cp-worker
+          Image tag: \`$IMAGE_TAG\`
+          Commit: ${{ github.sha }}
+
+          **Merge this PR to deploy to production.**" \
+          || echo "PR already exists or branch is up to date"
