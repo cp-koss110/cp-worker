@@ -21,8 +21,10 @@ RUN pip install --no-cache-dir --prefix=/install -r requirements.txt
 FROM base AS production
 
 ARG BUILD_DATE
-ARG VERSION=1.0.0
+ARG VERSION
 ARG VCS_REF
+
+ENV APP_VERSION=${VERSION:-unknown}
 
 LABEL org.opencontainers.image.created="${BUILD_DATE}" \
       org.opencontainers.image.version="${VERSION}" \

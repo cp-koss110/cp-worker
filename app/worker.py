@@ -46,6 +46,7 @@ logger = logging.getLogger(__name__)
 # Configuration
 # ==========================================
 AWS_REGION = os.getenv("AWS_REGION", "us-east-2")
+APP_VERSION = os.getenv("APP_VERSION", "unknown")
 SQS_QUEUE_URL = os.getenv("SQS_QUEUE_URL", "")
 S3_BUCKET_NAME = os.getenv("S3_BUCKET_NAME", "")
 POLL_INTERVAL = int(os.getenv("POLL_INTERVAL", "5"))
@@ -182,7 +183,7 @@ class Worker:
             "_worker_metadata": {
                 "processed_at": timestamp.isoformat(),
                 "s3_key": s3_key,
-                "worker_version": "1.0.0",
+                "worker_version": APP_VERSION,
             },
         }
 
