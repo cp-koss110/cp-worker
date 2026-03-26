@@ -33,7 +33,7 @@ repos:
       - id: unit-tests
         name: unit tests (fast)
         entry: .venv/bin/pytest
-        args: [tests/test_worker.py, -q, --tb=short, --no-header]
+        args: [tests/test_worker.py, -q, --tb=short, --no-header, --cov=app, --cov-report=term-missing]
         language: system
         pass_filenames: false
         types: [python]
