@@ -1,0 +1,49 @@
+repos:
+  # ── Basic file hygiene ─────────────────────────────────────────────────────
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v4.6.0
+    hooks:
+      - id: trailing-whitespace
+      - id: end-of-file-fixer
+      - id: check-yaml
+      - id: check-json
+      - id: check-merge-conflict
+      - id: check-added-large-files
+        args: [--maxkb=500]
+
+  # ── Python lint + format (ruff — already in requirements-dev.txt) ──────────
+  - repo: https://github.com/astral-sh/ruff-pre-commit
+    rev: v0.4.9
+    hooks:
+      - id: ruff
+        args: [--fix]
+      - id: ruff-format
+
+  # ── Secret scanning ────────────────────────────────────────────────────────
+  - repo: https://github.com/Yelp/detect-secrets
+    rev: v1.5.0
+    hooks:
+      - id: detect-secrets
+        # Exclude test files — they intentionally contain fake tokens
+        exclude: ^tests/
+
+  # ── Fast unit tests (mocked AWS, no real calls, ~2s) ──────────────────────
+  - repo: local
+    hooks:
+      - id: unit-tests
+        name: unit tests (fast)
+        entry: .venv/bin/pytest
+        args: [tests/test_worker.py, -q, --tb=short, --no-header, --cov=app, --cov-report=term-missing]
+        language: system
+        pass_filenames: false
+        types: [python]
+
+      # Disabled by default — runs only when called explicitly:
+      #   LOCALSTACK_ENDPOINT=http://localhost:4566 pre-commit run integration-tests --hook-stage manual
+      - id: integration-tests
+        name: integration tests (manual — requires LocalStack)
+        entry: .venv/bin/pytest
+        args: [tests/integration/, -v, --tb=short]
+        language: system
+        pass_filenames: false
+        stages: [manual]
