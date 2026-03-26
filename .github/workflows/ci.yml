@@ -49,25 +49,41 @@ jobs:
             --cov-report=term-missing \
             --cov-report=xml:coverage.xml
 
-      - name: Coverage summary (job summary)
+      - name: Generate coverage report
         if: always()
-        uses: irongut/CodeCoverageSummary@v1.3.0
-        with:
-          filename: coverage.xml
-          badge: true
-          format: markdown
-          output: both
-
-      - name: Add coverage to job summary
-        if: always()
-        run: cat code-coverage-results.md >> $GITHUB_STEP_SUMMARY
+        run: |
+          python - <<'PYEOF'
+          import xml.etree.ElementTree as ET, os, sys
+          try:
+              root = ET.parse('coverage.xml').getroot()
+              rate = float(root.get('line-rate', 0)) * 100
+              lines = [
+                  '## Test Coverage',
+                  '',
+                  f'**Total: {rate:.1f}%**',
+                  '',
+                  '| File | Coverage |',
+                  '|------|----------|',
+              ]
+              for cls in root.findall('.//class'):
+                  name = cls.get('filename', cls.get('name', ''))
+                  r = float(cls.get('line-rate', 0)) * 100
+                  lines.append(f'| `{name}` | {r:.1f}% |')
+              content = '\n'.join(lines) + '\n'
+              with open(os.environ['GITHUB_STEP_SUMMARY'], 'a') as f:
+                  f.write(content)
+              with open('coverage-summary.md', 'w') as f:
+                  f.write(content)
+          except Exception as e:
+              print(f'Coverage summary skipped: {e}', file=sys.stderr)
+          PYEOF
 
       - name: Post coverage comment on PR
         if: github.event_name == 'pull_request'
         uses: marocchino/sticky-pull-request-comment@v2
         with:
           recreate: true
-          path: code-coverage-results.md
+          path: coverage-summary.md
 
   integration-test:
     name: Integration Tests (LocalStack)
