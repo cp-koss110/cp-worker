@@ -85,8 +85,8 @@ jobs:
           git commit -m "chore: update worker_image_tag to $IMAGE_TAG" || echo "Nothing to commit"
           git push origin main
 
-      # ---- Open PR infra main → production ----
-      - name: Open PR infra main to production
+      # ---- Open or update PR infra main → production ----
+      - name: Open or update PR infra main to production
         if: |
           github.event_name == 'push' ||
           (github.event_name == 'workflow_dispatch' && inputs.open_pr == true)
@@ -95,17 +95,34 @@ jobs:
           GH_REPO: ${{ secrets.INFRA_REPO }}
         run: |
           cd infra
-          gh pr create \
-            --repo "$GH_REPO" \
-            --base production \
-            --head main \
-            --title "deploy: promote worker $IMAGE_TAG to production" \
-            --body "## Promote worker image tag \`$IMAGE_TAG\` to production
+          PR_TITLE="deploy: promote worker $IMAGE_TAG to production"
+          PR_BODY="## Promote worker image tag \`$IMAGE_TAG\` to production
 
           Triggered by: ${{ github.event_name }}
           Service: cp-worker
           Image tag: \`$IMAGE_TAG\`
           Commit: ${{ github.sha }}
 
-          **Merge this PR to deploy to production.**" \
-          || echo "PR already exists or branch is up to date"
+          **Merge this PR to deploy to production.**"
+
+          EXISTING_PR=$(gh pr list \
+            --repo "$GH_REPO" \
+            --base production \
+            --head main \
+            --json number \
+            --jq '.[0].number')
+
+          if [ -n "$EXISTING_PR" ]; then
+            echo "Updating existing PR #$EXISTING_PR with new tag $IMAGE_TAG"
+            gh pr edit "$EXISTING_PR" \
+              --repo "$GH_REPO" \
+              --title "$PR_TITLE" \
+              --body "$PR_BODY"
+          else
+            gh pr create \
+              --repo "$GH_REPO" \
+              --base production \
+              --head main \
+              --title "$PR_TITLE" \
+              --body "$PR_BODY"
+          fi
