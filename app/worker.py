@@ -8,12 +8,14 @@ import logging
 import os
 import signal
 import sys
+import threading
 import time
 from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional
 
 import boto3
 from botocore.exceptions import BotoCoreError, ClientError
+from prometheus_client import Counter, Histogram, Info, start_http_server
 
 # ==========================================
 # Logging — JSON format
@@ -53,6 +55,7 @@ POLL_INTERVAL = int(os.getenv("POLL_INTERVAL", "5"))
 MAX_MESSAGES = int(os.getenv("MAX_MESSAGES_PER_POLL", "10"))
 VISIBILITY_TIMEOUT = int(os.getenv("SQS_VISIBILITY_TIMEOUT", "30"))
 WAIT_TIME_SECONDS = int(os.getenv("SQS_WAIT_TIME_SECONDS", "20"))  # Long polling
+METRICS_PORT = int(os.getenv("METRICS_PORT", "8001"))
 
 # LocalStack support
 LOCALSTACK_ENDPOINT = os.getenv("LOCALSTACK_ENDPOINT", "")
@@ -65,6 +68,32 @@ if LOCALSTACK_ENDPOINT:
 # ==========================================
 sqs_client = boto3.client("sqs", **AWS_KWARGS)
 s3_client = boto3.client("s3", **AWS_KWARGS)
+
+# ==========================================
+# Prometheus Metrics
+# ==========================================
+BUILD_INFO = Info("worker_build", "Worker build information")
+BUILD_INFO.info({"version": APP_VERSION, "service": "worker"})
+
+MESSAGES_POLLED = Counter(
+    "worker_messages_polled",
+    "Total messages received from SQS",
+)
+MESSAGES_PROCESSED = Counter(
+    "worker_messages_processed",
+    "Messages processed by the worker",
+    ["status"],  # success | failed
+)
+S3_UPLOADS = Counter(
+    "worker_s3_uploads",
+    "S3 upload attempts",
+    ["status"],  # success | failed
+)
+PROCESSING_DURATION = Histogram(
+    "worker_message_processing_duration_seconds",
+    "End-to-end time to process one SQS message",
+    buckets=[0.05, 0.1, 0.25, 0.5, 1.0, 2.5, 5.0, 10.0],
+)
 
 
 # ==========================================
@@ -133,7 +162,10 @@ class Worker:
                 VisibilityTimeout=VISIBILITY_TIMEOUT,
                 MessageAttributeNames=["All"],
             )
-            return response.get("Messages", [])
+            messages = response.get("Messages", [])
+            if messages:
+                MESSAGES_POLLED.inc(len(messages))
+            return messages
         except (ClientError, BotoCoreError) as e:
             logger.error("SQS poll error: %s", e)
             time.sleep(self.poll_interval)
@@ -144,6 +176,7 @@ class Worker:
         receipt_handle = message.get("ReceiptHandle", "")
         message_id = message.get("MessageId", "unknown")
 
+        start = time.perf_counter()
         try:
             body = json.loads(message.get("Body", "{}"))
             logger.info("Processing message: id=%s", message_id)
@@ -155,21 +188,28 @@ class Worker:
             self._delete_from_sqs(receipt_handle, message_id)
 
             self._stats["processed"] += 1
+            MESSAGES_PROCESSED.labels(status="success").inc()
             logger.info("Message processed successfully: id=%s", message_id)
 
         except json.JSONDecodeError as e:
             logger.error("Invalid JSON in message %s: %s", message_id, e)
             self._stats["failed"] += 1
+            MESSAGES_PROCESSED.labels(status="failed").inc()
             # Don't delete - let it expire and go to DLQ
 
         except S3UploadError as e:
             logger.error("S3 upload failed for message %s: %s", message_id, e)
             self._stats["failed"] += 1
+            MESSAGES_PROCESSED.labels(status="failed").inc()
             # Don't delete - message stays in queue, will retry
 
         except Exception as e:
             logger.error("Unexpected error processing message %s: %s", message_id, e, exc_info=True)
             self._stats["failed"] += 1
+            MESSAGES_PROCESSED.labels(status="failed").inc()
+
+        finally:
+            PROCESSING_DURATION.observe(time.perf_counter() - start)
 
     def _upload_to_s3(self, body: Dict, message_id: str) -> None:
         """Upload message body as JSON to S3."""
@@ -198,8 +238,10 @@ class Worker:
                     "processed-at": timestamp.isoformat(),
                 },
             )
+            S3_UPLOADS.labels(status="success").inc()
             logger.info("Uploaded to S3: s3://%s/%s", self.bucket_name, s3_key)
         except (ClientError, BotoCoreError) as e:
+            S3_UPLOADS.labels(status="failed").inc()
             raise S3UploadError(f"S3 upload failed: {e}") from e
 
     def _delete_from_sqs(self, receipt_handle: str, message_id: str) -> None:
@@ -248,6 +290,15 @@ def main() -> None:
     if not S3_BUCKET_NAME:
         logger.error("S3_BUCKET_NAME is not set")
         sys.exit(1)
+
+    # Start Prometheus metrics HTTP server in background thread
+    metrics_thread = threading.Thread(
+        target=start_http_server,
+        args=(METRICS_PORT,),
+        daemon=True,
+    )
+    metrics_thread.start()
+    logger.info("Prometheus metrics server started on port %d", METRICS_PORT)
 
     # Register signal handlers for graceful shutdown
     signal.signal(signal.SIGTERM, _handle_signal)
