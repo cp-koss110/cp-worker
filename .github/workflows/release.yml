@@ -24,6 +24,8 @@ jobs:
   release:
     name: Build, Push & Update Infra
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
     steps:
       - name: Checkout service repo
         uses: actions/checkout@v4
@@ -126,3 +128,22 @@ jobs:
               --title "$PR_TITLE" \
               --body "$PR_BODY"
           fi
+
+      # ---- Create GitHub Release ----
+      - name: Create GitHub Release
+        if: github.event_name == 'push'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text)
+          IMAGE_URI="${ACCOUNT_ID}.dkr.ecr.${{ env.AWS_REGION }}.amazonaws.com/${{ env.ECR_REPO }}:${IMAGE_TAG}"
+          gh release create "${IMAGE_TAG}" \
+            --title "Release ${IMAGE_TAG}" \
+            --generate-notes \
+            --notes "## Docker Image
+
+          | | |
+          |---|---|
+          | **ECR image** | \`${IMAGE_URI}\` |
+          | **Commit** | \`${{ github.sha }}\` |
+          "

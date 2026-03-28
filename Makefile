@@ -1,4 +1,4 @@
-.PHONY: help install test test-unit test-integration lint pre-commit-install pre-commit-run venv-clean
+.PHONY: help install test test-unit test-integration lint pre-commit-install pre-commit-run venv-clean release
 
 VENV       := .venv
 PYTHON_BIN := $(shell python3.12 -c "import sys;print(sys.executable)" 2>/dev/null || python3.11 -c "import sys;print(sys.executable)" 2>/dev/null || echo python3)
@@ -19,6 +19,7 @@ help:
 	@echo "  pre-commit-install   Install pre-commit git hooks"
 	@echo "  pre-commit-run       Run all pre-commit hooks against all files"
 	@echo "  venv-clean           Remove .venv"
+	@echo "  release TAG=vX.Y.Z   Create + push a git tag to trigger the Release workflow"
 	@echo ""
 
 $(VENV)/bin/activate: requirements.txt requirements-dev.txt
@@ -54,3 +55,14 @@ pre-commit-run: install
 
 venv-clean:
 	rm -rf $(VENV)
+
+release:
+	@if [ -z "$(TAG)" ]; then \
+		echo "Usage: make release TAG=v1.2.3"; \
+		echo "  Creates an annotated tag and pushes it to origin."; \
+		echo "  The Release workflow will build the image and create a GitHub Release."; \
+		exit 1; \
+	fi
+	git tag -a $(TAG) -m "Release $(TAG)"
+	git push origin $(TAG)
+	@echo "Tag $(TAG) pushed — Release workflow starting."
