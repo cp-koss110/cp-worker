@@ -15,7 +15,7 @@ from typing import Any, Dict, List, Optional
 
 import boto3
 from botocore.exceptions import BotoCoreError, ClientError
-from prometheus_client import Counter, Histogram, Info, start_http_server
+from prometheus_client import REGISTRY, Counter, Histogram, Info, start_http_server
 
 # ==========================================
 # Logging — JSON format
@@ -72,24 +72,36 @@ s3_client = boto3.client("s3", **AWS_KWARGS)
 # ==========================================
 # Prometheus Metrics
 # ==========================================
-BUILD_INFO = Info("worker_build", "Worker build information")
+def _safe_register(cls, name, *args, **kwargs):
+    """Register a metric or return the existing one.
+
+    importlib.reload() re-runs module-level code against the same global
+    CollectorRegistry, causing ValueError on duplicate names. This helper
+    returns the already-registered collector instead of raising.
+    """
+    try:
+        return cls(name, *args, **kwargs)
+    except ValueError:
+        for collector in set(REGISTRY._names_to_collectors.values()):
+            if getattr(collector, "_name", None) == name:
+                return collector
+        raise
+
+
+BUILD_INFO = _safe_register(Info, "worker_build", "Worker build information")
 BUILD_INFO.info({"version": APP_VERSION, "service": "worker"})
 
-MESSAGES_POLLED = Counter(
-    "worker_messages_polled",
-    "Total messages received from SQS",
+MESSAGES_POLLED = _safe_register(
+    Counter, "worker_messages_polled", "Total messages received from SQS"
 )
-MESSAGES_PROCESSED = Counter(
-    "worker_messages_processed",
-    "Messages processed by the worker",
-    ["status"],  # success | failed
+MESSAGES_PROCESSED = _safe_register(
+    Counter, "worker_messages_processed", "Messages processed by the worker", ["status"]
 )
-S3_UPLOADS = Counter(
-    "worker_s3_uploads",
-    "S3 upload attempts",
-    ["status"],  # success | failed
+S3_UPLOADS = _safe_register(
+    Counter, "worker_s3_uploads", "S3 upload attempts", ["status"]
 )
-PROCESSING_DURATION = Histogram(
+PROCESSING_DURATION = _safe_register(
+    Histogram,
     "worker_message_processing_duration_seconds",
     "End-to-end time to process one SQS message",
     buckets=[0.05, 0.1, 0.25, 0.5, 1.0, 2.5, 5.0, 10.0],
