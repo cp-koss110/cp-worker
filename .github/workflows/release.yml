@@ -28,7 +28,7 @@ jobs:
       contents: write
     steps:
       - name: Checkout service repo
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
 
       - name: Configure AWS credentials
         uses: aws-actions/configure-aws-credentials@v4
@@ -63,7 +63,7 @@ jobs:
 
       # ---- Update infra repo image_tags.staging.tfvars ----
       - name: Checkout infra repo
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
         with:
           repository: ${{ secrets.INFRA_REPO }}
           token: ${{ secrets.INFRA_REPO_TOKEN }}
