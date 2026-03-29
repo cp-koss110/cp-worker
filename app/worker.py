@@ -17,6 +17,7 @@ import boto3
 from botocore.exceptions import BotoCoreError, ClientError
 from prometheus_client import REGISTRY, Counter, Histogram, Info, start_http_server
 
+
 # ==========================================
 # Logging — JSON format
 # ==========================================
@@ -31,6 +32,7 @@ class _JsonFormatter(logging.Formatter):
         if record.exc_info:
             payload["exception"] = self.formatException(record.exc_info)
         return json.dumps(payload)
+
 
 _handler = logging.StreamHandler()
 _handler.setFormatter(_JsonFormatter())
@@ -68,6 +70,7 @@ if LOCALSTACK_ENDPOINT:
 # ==========================================
 sqs_client = boto3.client("sqs", **AWS_KWARGS)
 s3_client = boto3.client("s3", **AWS_KWARGS)
+
 
 # ==========================================
 # Prometheus Metrics
@@ -124,7 +127,11 @@ class Worker:
         self.bucket_name = bucket_name
         self.poll_interval = poll_interval
         self._running = False
-        self._stats = {"processed": 0, "failed": 0, "started_at": datetime.now(timezone.utc).isoformat()}
+        self._stats = {
+            "processed": 0,
+            "failed": 0,
+            "started_at": datetime.now(timezone.utc).isoformat(),
+        }
 
     def start(self) -> None:
         """Start the worker loop (blocking)."""
@@ -216,7 +223,12 @@ class Worker:
             # Don't delete - message stays in queue, will retry
 
         except Exception as e:
-            logger.error("Unexpected error processing message %s: %s", message_id, e, exc_info=True)
+            logger.error(
+                "Unexpected error processing message %s: %s",
+                message_id,
+                e,
+                exc_info=True,
+            )
             self._stats["failed"] += 1
             MESSAGES_PROCESSED.labels(status="failed").inc()
 
