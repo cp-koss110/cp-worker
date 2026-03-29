@@ -4,8 +4,7 @@ Uses mocked AWS clients - no real AWS calls.
 """
 
 import json
-from datetime import datetime, timezone
-from unittest.mock import MagicMock, call, patch
+from unittest.mock import patch
 
 import pytest
 from botocore.exceptions import ClientError
@@ -55,6 +54,7 @@ def mock_s3():
 @pytest.fixture
 def worker(worker_env):
     from app.worker import Worker
+
     return Worker(queue_url=QUEUE_URL, bucket_name=BUCKET_NAME)
 
 
@@ -82,9 +82,7 @@ class TestWorkerInit:
 # ==========================================
 class TestSQSPolling:
     def test_poll_returns_messages(self, worker, mock_sqs):
-        mock_sqs.receive_message.return_value = {
-            "Messages": [SAMPLE_SQS_MESSAGE]
-        }
+        mock_sqs.receive_message.return_value = {"Messages": [SAMPLE_SQS_MESSAGE]}
         messages = worker._poll()
         assert len(messages) == 1
 
@@ -159,6 +157,7 @@ class TestS3Upload:
 
     def test_upload_failure_raises_s3_upload_error(self, worker, mock_s3):
         from app.worker import S3UploadError
+
         mock_s3.put_object.side_effect = ClientError(
             {"Error": {"Code": "NoSuchBucket", "Message": "Bucket not found"}},
             "PutObject",
@@ -180,7 +179,9 @@ class TestMessageHandling:
         """Ensure delete happens AFTER successful S3 upload."""
         call_order = []
         mock_s3.put_object.side_effect = lambda **kwargs: call_order.append("s3")
-        mock_sqs.delete_message.side_effect = lambda **kwargs: call_order.append("sqs_delete")
+        mock_sqs.delete_message.side_effect = lambda **kwargs: call_order.append(
+            "sqs_delete"
+        )
 
         worker._handle(SAMPLE_SQS_MESSAGE)
         assert call_order == ["s3", "sqs_delete"]
@@ -194,12 +195,16 @@ class TestMessageHandling:
         worker._handle(bad_message)
         assert worker.stats["failed"] == 1
 
-    def test_handle_invalid_json_does_not_delete_from_sqs(self, worker, mock_sqs, mock_s3):
+    def test_handle_invalid_json_does_not_delete_from_sqs(
+        self, worker, mock_sqs, mock_s3
+    ):
         bad_message = {**SAMPLE_SQS_MESSAGE, "Body": "invalid"}
         worker._handle(bad_message)
         mock_sqs.delete_message.assert_not_called()
 
-    def test_handle_s3_failure_does_not_delete_from_sqs(self, worker, mock_sqs, mock_s3):
+    def test_handle_s3_failure_does_not_delete_from_sqs(
+        self, worker, mock_sqs, mock_s3
+    ):
         """If S3 fails, message must NOT be deleted from SQS (so it retries)."""
         mock_s3.put_object.side_effect = ClientError(
             {"Error": {"Code": "NoSuchBucket", "Message": "Bucket not found"}},
@@ -208,8 +213,9 @@ class TestMessageHandling:
         worker._handle(SAMPLE_SQS_MESSAGE)
         mock_sqs.delete_message.assert_not_called()
 
-    def test_handle_s3_failure_increments_failed_counter(self, worker, mock_sqs, mock_s3):
-        from app.worker import S3UploadError
+    def test_handle_s3_failure_increments_failed_counter(
+        self, worker, mock_sqs, mock_s3
+    ):
         mock_s3.put_object.side_effect = ClientError(
             {"Error": {"Code": "NoSuchBucket", "Message": "Bucket not found"}},
             "PutObject",
