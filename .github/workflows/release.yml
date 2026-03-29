@@ -147,3 +147,12 @@ jobs:
           | **ECR image** | \`${IMAGE_URI}\` |
           | **Commit** | \`${{ github.sha }}\` |
           "
+
+      - name: Report workflow status to CloudWatch
+        if: always()
+        uses: aws-actions/action-cloudwatch-metrics@main
+        with:
+          namespace: GitHub/Actions
+          metric-name: WorkflowRun
+          metric-dimensions: >-
+            [{"Name":"Repository","Value":"${{ github.repository }}"},{"Name":"Workflow","Value":"${{ github.workflow }}"}]

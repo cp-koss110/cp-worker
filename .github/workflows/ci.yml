@@ -120,3 +120,20 @@ jobs:
           AWS_SECRET_ACCESS_KEY: test  # pragma: allowlist secret
           AWS_REGION: us-east-2
         run: pytest tests/integration/ -v --tb=short
+
+      - name: Configure AWS credentials
+        if: always()
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Report workflow status to CloudWatch
+        if: always()
+        uses: aws-actions/action-cloudwatch-metrics@main
+        with:
+          namespace: GitHub/Actions
+          metric-name: WorkflowRun
+          metric-dimensions: >-
+            [{"Name":"Repository","Value":"${{ github.repository }}"},{"Name":"Workflow","Value":"${{ github.workflow }}"}]
