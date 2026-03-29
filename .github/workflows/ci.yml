@@ -17,10 +17,10 @@ jobs:
     name: Lint
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v4
 
       - name: Set up Python
-        uses: actions/setup-python@v6
+        uses: actions/setup-python@v5
         with:
           python-version: "3.12"
 
@@ -37,10 +37,10 @@ jobs:
       contents: read
       pull-requests: write
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v4
 
       - name: Set up Python
-        uses: actions/setup-python@v6
+        uses: actions/setup-python@v5
         with:
           python-version: "3.12"
 
@@ -85,7 +85,7 @@ jobs:
 
       - name: Post coverage comment on PR
         if: github.event_name == 'pull_request'
-        uses: marocchino/sticky-pull-request-comment@v3
+        uses: marocchino/sticky-pull-request-comment@v2
         with:
           recreate: true
           path: coverage-summary.md
@@ -107,10 +107,10 @@ jobs:
           --health-timeout 5s
           --health-retries 15
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v4
 
       - name: Set up Python
-        uses: actions/setup-python@v6
+        uses: actions/setup-python@v5
         with:
           python-version: "3.12"
 
@@ -126,7 +126,7 @@ jobs:
         run: pytest tests/integration/ -v --tb=short
 
       - name: Configure AWS credentials
-        if: always()
+        if: always() && github.actor != 'dependabot[bot]'
         uses: aws-actions/configure-aws-credentials@v4
         with:
           aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
@@ -134,7 +134,7 @@ jobs:
           aws-region: ${{ env.AWS_REGION }}
 
       - name: Report workflow status to CloudWatch
-        if: always()
+        if: always() && github.actor != 'dependabot[bot]'
         uses: aws-actions/action-cloudwatch-metrics@main
         with:
           namespace: GitHub/Actions
