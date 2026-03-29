@@ -2,6 +2,7 @@
 
 ![CI](https://github.com/koss110/cp-worker/actions/workflows/ci.yml/badge.svg)
 ![Release](https://github.com/koss110/cp-worker/actions/workflows/release.yml/badge.svg)
+![CodeQL](https://github.com/koss110/cp-worker/actions/workflows/codeql.yml/badge.svg)
 ![Python](https://img.shields.io/badge/python-3.12-blue)
 
 SQS consumer microservice — polls an SQS queue on a configurable interval, uploads each message as a JSON object to S3, then deletes it from the queue.
