@@ -43,4 +43,4 @@ ENV PYTHONPATH=/app
 ENV PYTHONDONTWRITEBYTECODE=1
 ENV PYTHONUNBUFFERED=1
 
-CMD ["python", "-m", "app.worker"]
+CMD ["python", "-m", "app.worker"] #Bla
