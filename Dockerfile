@@ -44,3 +44,4 @@ ENV PYTHONDONTWRITEBYTECODE=1
 ENV PYTHONUNBUFFERED=1
 
 CMD ["python", "-m", "app.worker"]
+
