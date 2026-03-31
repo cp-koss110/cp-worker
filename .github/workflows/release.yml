@@ -56,7 +56,6 @@ jobs:
             -t $REGISTRY/$ECR_REPO:$IMAGE_TAG .
           docker push $REGISTRY/$ECR_REPO:$IMAGE_TAG
           echo "IMAGE_TAG=$IMAGE_TAG" >> $GITHUB_ENV
-
       - name: Set image tag for dispatch
         if: github.event_name == 'workflow_dispatch'
         run: echo "IMAGE_TAG=${{ inputs.image_tag }}" >> $GITHUB_ENV
@@ -76,7 +75,6 @@ jobs:
             infra/iac/terraform/envs/eus2/image_tags.staging.tfvars
           sed -i "s|^worker_image_tag.*=.*|worker_image_tag = \"$IMAGE_TAG\"|" \
             infra/iac/terraform/envs/eus2/image_tags.production.tfvars
-
       - name: Commit and push image tag update
         run: |
           cd infra
@@ -86,7 +84,6 @@ jobs:
                   iac/terraform/envs/eus2/image_tags.production.tfvars
           git commit -m "chore: update worker_image_tag to $IMAGE_TAG" || echo "Nothing to commit"
           git push origin main
-
       # ---- Open or update PR infra main → production ----
       - name: Open or update PR infra main to production
         if: |
@@ -99,21 +96,17 @@ jobs:
           cd infra
           PR_TITLE="deploy: promote worker $IMAGE_TAG to production"
           PR_BODY="## Promote worker image tag \`$IMAGE_TAG\` to production
-
           Triggered by: ${{ github.event_name }}
           Service: cp-worker
           Image tag: \`$IMAGE_TAG\`
           Commit: ${{ github.sha }}
-
           **Merge this PR to deploy to production.**"
-
           EXISTING_PR=$(gh pr list \
             --repo "$GH_REPO" \
             --base production \
             --head main \
             --json number \
             --jq '.[0].number')
-
           if [ -n "$EXISTING_PR" ]; then
             echo "Updating existing PR #$EXISTING_PR with new tag $IMAGE_TAG"
             gh pr edit "$EXISTING_PR" \
@@ -128,7 +121,6 @@ jobs:
               --title "$PR_TITLE" \
               --body "$PR_BODY"
           fi
-
       # ---- Create GitHub Release ----
       - name: Create GitHub Release
         if: github.event_name == 'push'
@@ -141,13 +133,11 @@ jobs:
             --title "Release ${IMAGE_TAG}" \
             --generate-notes \
             --notes "## Docker Image
-
           | | |
           |---|---|
           | **ECR image** | \`${IMAGE_URI}\` |
           | **Commit** | \`${{ github.sha }}\` |
           "
-
       - name: Report workflow status to CloudWatch
         if: always()
         uses: aws-actions/action-cloudwatch-metrics@main
