@@ -1,13 +1,13 @@
 # cp-worker
 
-![CI](https://github.com/koss110/cp-worker/actions/workflows/ci.yml/badge.svg)
-![Release](https://github.com/koss110/cp-worker/actions/workflows/release.yml/badge.svg)
-![CodeQL](https://github.com/koss110/cp-worker/actions/workflows/codeql.yml/badge.svg)
+![CI](https://github.com/cp-koss110/cp-worker/actions/workflows/ci.yml/badge.svg)
+![Release](https://github.com/cp-koss110/cp-worker/actions/workflows/release.yml/badge.svg)
+![CodeQL](https://github.com/cp-koss110/cp-worker/actions/workflows/codeql.yml/badge.svg)
 ![Python](https://img.shields.io/badge/python-3.12-blue)
 
 SQS consumer microservice — polls an SQS queue on a configurable interval, uploads each message as a JSON object to S3, then deletes it from the queue.
 
-> Infrastructure, local stack, and CI/CD orchestration live in [`cp-infra`](https://github.com/koss110/cp-infra).
+> Infrastructure, local stack, and CI/CD orchestration live in [`cp-infra`](https://github.com/cp-koss110/cp-infra).
 
 ---
 
@@ -69,7 +69,7 @@ Each file is enriched with processing metadata:
 
 ## Local development
 
-The full local stack (LocalStack + cp-api + cp-worker) is managed from [`cp-infra`](https://github.com/koss110/cp-infra). Clone all three repos as siblings:
+The full local stack (LocalStack + cp-api + cp-worker) is managed from [`cp-infra`](https://github.com/cp-koss110/cp-infra). Clone all three repos as siblings:
 
 ```
 parent-dir/
